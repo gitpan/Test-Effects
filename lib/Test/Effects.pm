@@ -4,7 +4,7 @@ use warnings;
 use strict;
 use 5.014;
 
-our $VERSION = '0.000004';
+our $VERSION = '0.000005';
 
 use Test::More;
 use Test::Trap;
@@ -13,7 +13,7 @@ use base 'Test::Builder::Module';
 # Export the modules interface (and that of Test::More)...
 our @EXPORT = (
     qw( effects_ok ),
-    qw( ONLY VERBOSE ),
+    qw( ONLY VERBOSE TIME ),
     @Test::More::EXPORT,
 );
 
@@ -227,9 +227,11 @@ BEGIN {
 
 
 # Make a copy of a hash with an appropriate flag added...
-sub ONLY    (+)  { return { %{shift()}, ONLY    => 1 } }
-sub VERBOSE (+)  { return { %{shift()}, VERBOSE => 1 } }
+sub ONLY    (+)  { return { ONLY    => 1, %{shift()} } }
+sub VERBOSE (+)  { return { VERBOSE => 1, %{shift()} } }
+sub TIME    (+)  { return { TIME    => 1, %{shift()} } }
 
+my $MS_THRESHHOLD = 0.1; # seconds (anything less reported in ms)
 
 # Test all trapped info, as requested...
 sub effects_ok (&;+$) {
@@ -249,6 +251,17 @@ sub effects_ok (&;+$) {
              . lc(ref($expected) || 'scalar value');
     }
 
+    # If there's a timing request, the value has to make sense...
+    my $timing;
+    if (exists $expected->{'timing'}) {
+        my $spec = $expected->{'timing'};
+        my $valid_time =  ref($spec) =~ m{ \A (?: HASH | ARRAY ) \Z}xms
+                      || !ref($spec) && looks_like_number($spec);
+        if (!$valid_time) {
+            _croak("Invalid timing specification: timing => '$spec'");
+        }
+    }
+
     # Get lexical hints...
     my %lexical_hint = %{ (caller 0)[10] // {} };
 
@@ -256,6 +269,11 @@ sub effects_ok (&;+$) {
     my $is_only
         = exists $expected->{'ONLY'} ? $expected->{'ONLY'}
         :                              $lexical_hint{'Test::Effects::ONLY'};
+
+    # Time the test, if requested
+    my $timed_test
+        = exists $expected->{'TIME'} ? $expected->{'TIME'}
+        :                              $lexical_hint{'Test::Effects::TIME'};
 
     if (!$is_only) {
         my $warn = $expected->{'warn'};
@@ -282,18 +300,28 @@ sub effects_ok (&;+$) {
         = exists $expected->{'VERBOSE'} ? !$expected->{'VERBOSE'}
         :                                 !$lexical_hint{'Test::Effects::VERBOSE'};
 
-    my $tests_output;
-    if ($is_terse) {
-        given (Test::Builder->new()) {
-            $_->output(\$tests_output);
-            $_->failure_output(\$tests_output);
-            $_->todo_output(\$tests_output);
-        }
+    # Show the description...
+    my $preview_desc = !$is_terse || exists $expected->{'timing'};
+    if ($preview_desc) {
+        note '_' x (3 + length $desc);
+        note exists $expected->{'timing'}
+                ? "$desc (being timed)..."
+                : "$desc...";
     }
 
-    # Show the description (if appropriate)...
-    note '_' x (3 + length $desc);
-    note $desc . '...';
+    # Redirect test output, so we can retrospectively de-terse on errors...
+    my $tests_output;
+    given (Test::Builder->new()) {
+        $_->output(\$tests_output);
+        $_->failure_output(\$tests_output);
+        $_->todo_output(\$tests_output);
+    }
+
+    # Preview description under terse too, in case of failures...
+    if (!$preview_desc) {
+        note '_' x (3 + length $desc);
+        note "$desc...";
+    }
 
     # Are we WITHOUT any modules in this test???
     my @real_INC = @INC;
@@ -395,27 +423,52 @@ sub effects_ok (&;+$) {
                    . "         To silence this warning, either remove the option entirely\n"
                    . "         or replace it with: {void_return => undef})";
             }
-            trap { $block->() };
-            pass 'Tested in void context, so ignored return value';
+            if ($timed_test) {
+                _time_calls_to($block, $timed_test => $timing);
+            }
+            else {
+                trap { $block->() };
+            }
+            pass 'Tested in void context, so ignored return value'
         }
         # 2. Explicit scalar context...
         elsif (exists $expected->{'scalar_return'}) {
-            my $return_val =  trap { $block->() };
+            my $return_val = do {
+                if ($timed_test) {
+                    _time_calls_to($block, $timed_test => $timing);
+                }
+                else {
+                    trap { $block->() };
+                }
+            };
             _is_like_or_deeply $return_val, $expected->{'scalar_return'}
                             => 'Scalar context return value was as expected';
         }
         # 3. Explicit list context...
         elsif (exists $expected->{'list_return'}) {
-            my @return_vals = trap { $block->() };
+            my @return_vals = do {
+                if ($timed_test) {
+                    _time_calls_to($block, $timed_test => $timing);
+                }
+                else {
+                    trap { $block->() };
+                }
+            };
             _is_deeply \@return_vals, $expected->{'list_return'}
                     => 'List context return value was as expected';
         }
         # 4. Implied void context...
         else {
-            trap { $block->() };
+            if ($timed_test) {
+                _time_calls_to($block, $timed_test => $timing);
+            }
+            else {
+                trap { $block->() };
+            }
             pass 'No return value specified, so tested in void context';
         }
 
+        # Test side-effects...
         for my $info (qw< stdout stderr warn die exit>) {
             if (exists $expected->{$info}) {
                 no strict 'refs';
@@ -427,6 +480,52 @@ sub effects_ok (&;+$) {
             }
         }
 
+        # Do timing, if requested...
+
+        if (exists $expected->{'timing'}) {
+
+            # Work out the parameters...
+            my $time_spec = $expected->{'timing'};
+            my $spec_type = ref $time_spec;
+
+            my $min = $spec_type eq 'HASH'  ? $time_spec->{'min'} // 0
+                    : $spec_type eq 'ARRAY' ? $time_spec->[0]     // 0
+                    :                         0;
+
+            state $INF = 0 + 'inf';
+            my $max = $spec_type eq 'HASH'          ? $time_spec->{'max'} // $INF
+                    : $spec_type eq 'ARRAY'         ? $time_spec->[-1]    // $INF
+                    :                                 0+$time_spec;
+
+            # Run the test...
+            my $duration = _time_calls_to($block);
+
+            # Compute a handy alternate measure of performance...
+            my $speed = $duration ? 1/$duration : 0;
+               $speed = $speed > 1 ? sprintf('(%1.0lf/sec)', $speed)
+                      : $speed > 0 ? sprintf('(%0.4g/sec)', $speed)
+                      :              '(unmeasurably fast)';
+
+            # Was the result acceptable???
+            my $in_range = $min <= $duration && $duration <= $max;
+
+            # Report outcome...
+            ok $in_range => $duration > $MS_THRESHHOLD
+                ? sprintf('Ran in %0.3f sec %s', $duration, $speed)
+                : sprintf('Ran in %dms %s', 1000*$duration, $speed);
+
+            # Clean up report...
+            if (!$in_range) {
+                $tests_output =~ s{\N*\n\N*\n\z}{}xms;
+            }
+
+            # Report any problems (as being in the appropriate place)...
+            local $Test::Builder::Level = $Test::Builder::Level + $LEVEL_OFFSET_NESTED - 1;
+            if (!$in_range) {
+                diag sprintf "         Expected to run in: $min to $max sec", $min, $max;
+            }
+        }
+
     };
 
     # Clean up...
@@ -435,21 +534,86 @@ sub effects_ok (&;+$) {
 
     # Report outcomes...
     my $passed = ($builder->summary)[-1];
-    if ($is_terse) {
-        # If passed, just print the summary (i.e. last line)...
-        if ( $passed ) {
-            $tests_output =~ s{ .* \n (?= .*\n )}{}xms;
-        }
-        # Otherwise print the probems...
-        else {
-            $tests_output =~ s{^ \s*+ (?! not | [#] ) [^\n]* \n}{}gxms;
-        }
-        print {$builder->output} $tests_output;
+    # If passed in terse mode, just print the summary (i.e. last line)...
+    if ( $is_terse && $passed ) {
+        $tests_output =~ s{ .* \n (?= .*\n )}{}xms;
     }
+    # Otherwise print the probems...
+    elsif ( $is_terse ) {
+        $tests_output =~ s{^ \s*+ (?! not | [#] ) [^\n]* \n}{}gxms;
+    }
+
+    # Add the timing info, if requested...
+    if ($timed_test) {
+        $tests_output =~ s{^ ( (?:not|ok) \s \N*) }{$1\t$timing}xms;
+    }
+
+    print {$builder->output} $tests_output;
 
     return $passed;
 }
 
+
+BEGIN { eval{ require Time::HiRes and Time::HiRes->import('time') } }
+
+sub _time_calls_to {
+    my ($block, $time_one_call) = @_;
+
+    state $MAX_CPU_TIME              = 1;
+    state $MIN_CREDIBLE_UTILIZATION  = 0.1;
+
+    my ($cpu_time, $wall_time) = (0,0);
+    my $count = 0;
+
+    my (@start, @end);
+    my $wantarray = wantarray;
+    my (@result, $result);
+
+    while (1) {
+        if ($time_one_call && $wantarray) {
+            @start = (time, times);
+            @result = trap { $block->() };
+            @end   = (time, times);
+        }
+        elsif ($time_one_call && defined $wantarray) {
+            @start = (time, times);
+            $result = trap { $block->() };
+            @end   = (time, times);
+        }
+        else {
+            @start = (time, times);
+            trap { $block->() };
+            @end   = (time, times);
+        }
+
+        $wall_time += $end[0] - $start[0];
+        $cpu_time  += $end[$_] - $start[$_] for 1..4;
+
+        $count++;
+
+        last if $cpu_time  > $MAX_CPU_TIME
+             || $wall_time > 2 * $MAX_CPU_TIME
+             || $time_one_call;
+    }
+
+    my $utilization = $cpu_time / ($wall_time||1);
+    my $timing = !$cpu_time || $utilization < $MIN_CREDIBLE_UTILIZATION
+                    ? $wall_time / $count
+                    : $cpu_time  / $count;
+
+    if ($time_one_call) {
+        if ($timing < $MS_THRESHHOLD) {
+            $_[2] = '[' . int($timing * 1000) . 'ms]';
+        }
+        else {
+            $_[2] = sprintf '[%0.2lf sec]', $timing;
+        }
+        return $wantarray ? @result : $result;
+    }
+    else {
+        return $timing;
+    }
+}
 
 
 1; # Magic true value required at end of module
@@ -462,7 +626,7 @@ Test::Effects - Test all effects at once: return, I/O, warning, exceptions, etc.
 
 =head1 VERSION
 
-This document describes Test::Effects version 0.000004
+This document describes Test::Effects version 0.000005
 
 
 =head1 SYNOPSIS
@@ -515,12 +679,12 @@ The block may contain calls to other Test::Builder-based testing
 modules; these are handled correctly within the overall test.
 
 The second argument is a hash reference, whose entries specify the
-expected side-effects of executing the block. You specify the name of 
+expected side-effects of executing the block. You specify the name of
 the side-effect you're interested in as the key, and the "effect" you
 expected as the value. Side-effects that are not explicitly specified
 are automatically tested for default behaviour (e.g. no warnings,
 no exceptions, no output, not call to C<exit()>, etc. If the entire
-hash is omitted, all possible side-effects are tested for default 
+hash is omitted, all possible side-effects are tested for default
 behaviour (in other words, did the block of code have I<no> side-effects
 whatsoever?)
 
@@ -533,9 +697,9 @@ generates a description based on the line number at which it was called.
 
 =head2 C<use Test::Effects;>
 
-Loads the module, and exports the C<effects_ok()>, C<VERBOSE()>, and
-C<ONLY()> subroutines (see below). Also exports the standard interface from
-the Test::More module.
+Loads the module, and exports the C<effects_ok()>, C<VERBOSE()>,
+C<ONLY()>, and C<TIME()> subroutines (see below). Also exports the
+standard interface from the Test::More module.
 
 =head2 C<< use Test::Effects tests => $N; >>
 
@@ -551,17 +715,18 @@ S<C<use Test::More>>.
 
 Only export the C<effects_ok()> subroutine.
 
-Do not export C<VERBOSE()>, C<ONLY()>, or any of the Test::More interface.
+Do not export C<VERBOSE()>, C<ONLY()>, C<TIME()>,
+or any of the Test::More interface.
 
 
 =head2 C<< use Test::Effects import => [':more']; >>
 
 Only export the C<effects_ok()> subroutine and the Test::More interface
 
-Do not export C<VERBOSE()> or C<ONLY()>.
+Do not export C<VERBOSE()>, C<ONLY()>, or C<TIME()>.
 
 
-=head2 C<effects_ok {BLOCK} {EFFECTS_HASH} 'TEST_DESCRIPTION';>
+=head2 C<< effects_ok {BLOCK} {EFFECTS_HASH} => 'TEST_DESCRIPTION'; >>
 
 Test the code in the block, ensuring that the side-effects named by the
 keys of the hash match the corresponding hash values. Both the hash
@@ -571,8 +736,6 @@ The effects that can be specified as key/value pairs
 in the hash are:
 
 =over
-
-=item C<< return      => undef >>
 
 =item C<< void_return => undef >>
 
@@ -667,7 +830,68 @@ You can also use Test::More-ish tests, if you prefer:
 The block should call C<exit()> and the exit code should match the
 value specified.
 
+
+=item C<< timing => { min => $MIN_SEC, max => $MAX_SEC }  >>
+
+=item C<< timing => [$MIN_SEC, $MAX_SEC] >>
+
+=item C<< timing => $MAX_SEC >>
+
+This option performs a separate timing measurment for the block, by
+running it multiple times over at least 1 cpu-second and averaging the
+times required for each run (i.e. like the Benchmark module does).
+
+When passed a hash reference, the C<'min'> and C<'max'> entries
+specify the range of allowable timings (in seconds) for the block.
+For example:
+
+    # Test our new snooze() function...
+    effects_ok { snooze(1.5, plus_or_minus=>0.2); }
+               {
+                    timing => { min => 1.3, max => 1.7 },
+               }
+               => 'snooze() slept about the right amount of time';
+
+The default for C<'min'> is zero seconds;
+the default for C<'max'> is eternity.
+
+If you use an array reference instead of a hash reference, the first
+value in the array is taken as the minimum time, and the final value is
+taken as the maximum allowed time. Hence the above time specification
+could also be written:
+
+    timing => [ 1.3, 1.7 ],
+
+But don't write:
+
+    timing => [ 1.3 .. 1.7 ],
+
+(unless your limits are integers),
+because Perl truncates the bounds of a range,
+so it treats C<[1.3 .. 1.7]> as C<[1 .. 1]>.
+
+If you use a number instead of a reference, then
+number is taken as the maximum time allowed:
+
+    timing => 3.2,    # Same as: timing => { min => 0, max => 3.2 }
+
+If you do not specify either time limit:
+
+    timing => {},
+
+or:
+
+    timing => [],
+
+then the "zero-to-eternity" defaults are used and C<effects_ok()> simply
+times the block and reports the timing (as a success).
+
+Note that the timings measured using this option are considerably more
+accurate than those produced by the C<< TIME => 1 >> option (see below),
+but also take significantly longer to measure.
+
 =back
+
 
 Other configuration options that can be specified as key/value pairs in
 the hash are:
@@ -691,6 +915,21 @@ C<effects_ok()> to omit the "default" tests for unnamed side-effects.
 
 When this option is false (or omitted) unspecified options are tested
 for their expected default behaviour.
+
+
+=item C<< TIME => $BOOLEAN >>
+
+If the value is true, the block is timed as it is executed.
+The timing is reported in the final TAP line.
+
+Note that this option is entirely independent of the C<'timing'> option
+(which times the block repeatedly and then tests it against specified
+limits).
+
+In contrast, the C<'TIME'> option merely times the block once, while it
+is being evaluated for the other tests. This is much less accurate, but
+also much faster and much less intrusive, when you merely want an rough
+indication of performance.
 
 
 =item C<< WITHOUT => 'Module::Name' >>
@@ -743,11 +982,24 @@ is just a shorthand for:
     effects_ok { BLOCK }
                { return => 0, stdout => 'ok', ONLY => 1 }
 
-Note that the C<VERBOSE> and C<ONLY> subs can be "stacked"
-(in either order):
+
+=head2 C<< TIME I<$HASH_REF> >>
+
+A call such as:
 
     effects_ok { BLOCK }
-               ONLY VERBOSE { return => 0, stdout => 'ok' }
+               TIME { return => 0, stdout => 'ok' }
+
+is just a shorthand for:
+
+    effects_ok { BLOCK }
+               { return => 0, stdout => 'ok', TIME => 1 }
+
+Note that the C<VERBOSE>, C<ONLY>, and C<TIME> subs can be "stacked"
+(in any combination and order):
+
+    effects_ok { BLOCK }
+               TIME ONLY VERBOSE { return => 0, stdout => 'ok' }
 
     effects_ok { BLOCK }
                VERBOSE ONLY { return => 0, stdout => 'ok' }
@@ -760,7 +1012,7 @@ in the current lexical scope to act as if it had a
 S<< C<< VERBOSE => 1 >> >> option set.
 
 Note, however, that an explicit S<< C<< VERBOSE => 0 >> >> in
-any call overrides this default.
+any call in the scope overrides this default.
 
 =head2 C<< no Test::Effects::VERBOSE; >>
 
@@ -768,7 +1020,7 @@ This causes every subsequent call to C<effects_ok()>
 in the current lexical scope to act as if it had a
 S<< C<< VERBOSE => 0 >> >> option set. Again, however,
 an explicit S<< C<< VERBOSE => 1 >> >> in
-any call overrides this default.
+any call in the scope overrides this default.
 
 
 =head2 C<< use Test::Effects::ONLY; >>
@@ -778,7 +1030,7 @@ in the current lexical scope to act as if it had a
 S<< C<< ONLY => 1 >> >> option set.
 
 Note, however, that an explicit S<< C<< ONLY => 0 >> >> in
-any call overrides this default.
+any call in the scope overrides this default.
 
 =head2 C<< no Test::Effects::ONLY; >>
 
@@ -786,7 +1038,25 @@ This causes every subsequent call to C<effects_ok()>
 in the current lexical scope to act as if it had a
 S<< C<< ONLY => 0 >> >> option set. Again, however,
 an explicit S<< C<< ONLY => 1 >> >> in
-any call overrides this default.
+any call in the scope overrides this default.
+
+
+=head2 C<< use Test::Effects::TIME; >>
+
+This causes every subsequent call to C<effects_ok()>
+in the current lexical scope to act as if it had a
+S<< C<< TIME => 1 >> >> option set.
+
+Note, however, that an explicit S<< C<< TIME => 0 >> >> in
+any call in the scope overrides this default.
+
+=head2 C<< no Test::Effects::TIME; >>
+
+This causes every subsequent call to C<effects_ok()>
+in the current lexical scope to act as if it had I<no>
+S<< C<< TIME => 0 >> >> option set. Again, however,
+an explicit S<< C<< TIME => 1 >> >> in
+any call in the scope overrides this default.
 
 
 =head1 DIAGNOSTICS
@@ -814,6 +1084,13 @@ Or you may have accidentally used an array instead of a hash:
 
 That is not supported, as it is being reserved for a
 future feature.
+
+=item C<< "Invalid timing specification: timing => %s" >>
+
+The C<'timing'> option expects a hash reference, array reference,
+or a single number as its value. You specified some value that
+was something else (and which C<effects_ok()> therefore didn't
+understand).
 
 =back
 

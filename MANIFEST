@@ -6,7 +6,6 @@ lib/Test/Effects.pm
 lib/Test/Effects/ONLY.pm
 lib/Test/Effects/VERBOSE.pm
 t/00.load.t
-t/ONLY_VERBOSE.t
 t/ONLY_scoped.t
 t/ONLY_sub.t
 t/VERBOSE_ONLY_subs.t
@@ -21,4 +20,12 @@ t/import_minimal.t
 t/import_more.t
 t/only.t
 t/verbose.t
+t/ONLY_VERBOSE_TIME.t
+t/TIME_scoped.t
+t/TIME_sub.t
+t/diagnostics.t
+t/time.t
+t/timing.t
+t/lib/Test/Effects/Module1.pm
+t/lib/Test/Effects/Module2.pm
 META.yml                                 Module meta-data (added by MakeMaker)
