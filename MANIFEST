@@ -5,6 +5,7 @@ README
 lib/Test/Effects.pm
 lib/Test/Effects/ONLY.pm
 lib/Test/Effects/VERBOSE.pm
+lib/Test/Effects/TIME.pm
 t/00.load.t
 t/ONLY_scoped.t
 t/ONLY_sub.t

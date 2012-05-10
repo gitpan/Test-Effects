@@ -4,7 +4,7 @@ use warnings;
 use strict;
 use 5.014;
 
-our $VERSION = '0.000005';
+our $VERSION = '0.000007';
 
 use Test::More;
 use Test::Trap;
@@ -626,7 +626,7 @@ Test::Effects - Test all effects at once: return, I/O, warning, exceptions, etc.
 
 =head1 VERSION
 
-This document describes Test::Effects version 0.000005
+This document describes Test::Effects version 0.000007
 
 
 =head1 SYNOPSIS
