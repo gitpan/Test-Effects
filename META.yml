@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:               Test-Effects
-version:            0.000007
-abstract:           Test all effects at once: return, I/O, warning, exceptions, etc.
+version:            0.001000
+abstract:           Test all effects at once: return value, I/O, warnings, exceptions, etc.
 author:
     - Damian Conway <DCONWAY@CPAN.org>
 license:            perl

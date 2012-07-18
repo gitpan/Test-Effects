@@ -1,18 +1,12 @@
-Test::Effects version 0.000007
+Test::Effects version 0.001000
 
-[ REPLACE THIS...
+Test::Effects provides a single exported subroutine: effects_ok();
 
-  The README is used to introduce the module and provide instructions on
-  how to install the module, any machine dependencies it may have (for
-  example C compilers and installed libraries) and any other information
-  that should be understood before the module is installed.
-
-  A README file is required for CPAN modules since CPAN extracts the
-  README file from a module distribution so that people browsing the
-  archive can use it get an idea of the modules uses. It is usually a
-  good idea to provide version information here so that people can
-  decide whether fixes for the module are worth downloading.
-]
+This sub expects a code block to execute, followed by a hash that
+specifies which side-effects of that code shoudl be tested (and how).
+The module can test everything that Test::Trap does, as well as
+timing information, but provides a much more convenient interface
+for specifying those tests.
 
 
 INSTALLATION

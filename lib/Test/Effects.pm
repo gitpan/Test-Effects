@@ -4,7 +4,7 @@ use warnings;
 use strict;
 use 5.014;
 
-our $VERSION = '0.000007';
+our $VERSION = '0.001000';
 
 use Test::More;
 use Test::Trap;
@@ -621,12 +621,12 @@ __END__
 
 =head1 NAME
 
-Test::Effects - Test all effects at once: return, I/O, warning, exceptions, etc.
+Test::Effects - Test all effects at once: return value, I/O, warnings, exceptions, etc.
 
 
 =head1 VERSION
 
-This document describes Test::Effects version 0.000007
+This document describes Test::Effects version 0.001000
 
 
 =head1 SYNOPSIS
@@ -649,7 +649,7 @@ my @expected_list_context_return_values;
 
     # Test only specifically requested side-effects of some code...
     effects_ok { your_code_here() }
-           only {
+           ONLY {
                return => \@expected_list_context_return_values,
                stderr => 'Expected output to STDERR',
                die    => undef,  # i.e. Doesn't die.
