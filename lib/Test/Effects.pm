@@ -4,7 +4,7 @@ use warnings;
 use strict;
 use 5.014;
 
-our $VERSION = '0.001000';
+our $VERSION = '0.001002';
 
 use Test::More;
 use Test::Trap;
@@ -108,8 +108,10 @@ sub _is_like_or_deeply {
                                         : $got;
                           like($got_val, $expected, $desc);
                         }
-        when (q{} && looks_like_number($expected)) { &is_num(@_); }
-        when (q{})                                 { &is(@_);   }
+        when (q{}) {
+            if (looks_like_number($expected)) { &is_num(@_) }
+            else                              {     &is(@_) }
+        }
         default { &is_deeply(@_) }
     }
 }
@@ -626,7 +628,7 @@ Test::Effects - Test all effects at once: return value, I/O, warnings, exception
 
 =head1 VERSION
 
-This document describes Test::Effects version 0.001000
+This document describes Test::Effects version 0.001002
 
 
 =head1 SYNOPSIS

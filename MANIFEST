@@ -17,6 +17,7 @@ t/WITHOUT_dir_pat.t
 t/WITHOUT_module.t
 t/WITHOUT_module_pat.t
 t/basic.t
+t/expected_string.t
 t/import_minimal.t
 t/import_more.t
 t/only.t
@@ -29,7 +30,4 @@ t/time.t
 t/timing.t
 t/lib/Test/Effects/Module1.pm
 t/lib/Test/Effects/Module2.pm
-
-t/lib:
-Test
 META.yml                                 Module meta-data (added by MakeMaker)

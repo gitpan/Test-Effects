@@ -8,9 +8,6 @@ Revision history for Test-Effects
 0.000005  Thu May 10 12:32:17 2012
 
     - Added TIME => 1  and  timing => $SPEC
-
-Unreleased changes
-
     - Included missing file (sorry Swen!)
 
 
@@ -22,3 +19,8 @@ Unreleased changes
 
     First public release
 
+
+
+0.001002  Thu Feb 21 13:21:42 2013
+
+    - Fixed minor bug in checking string return values
