@@ -1,5 +1,6 @@
 package Test::Effects::VERBOSE;
 
+no if $] >= 5.018, 'warnings', "experimental";
 use 5.014;
 use warnings;
 
