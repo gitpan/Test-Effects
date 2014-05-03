@@ -5,7 +5,7 @@ no if $] >= 5.018, 'warnings', "experimental::smartmatch";
 use strict;
 use 5.014;
 
-our $VERSION = '0.001003';
+our $VERSION = '0.001004';
 
 use Test::More;
 use Test::Trap;
@@ -398,7 +398,7 @@ sub effects_ok (&;+$) {
     # Test in a subtest...
     my $failed = _subtest $desc => sub {
         # Find the specified return value (if any)...
-        my @return_specs = grep /return/, keys $expected;
+        my @return_specs = grep /return/, keys %{$expected};
         if (@return_specs > 1) {
             _fail "Ambiguous specification for testing of return value.";
             diag "ERROR: Found request for " . scalar(@return_specs),
@@ -629,7 +629,7 @@ Test::Effects - Test all effects at once: return value, I/O, warnings, exception
 
 =head1 VERSION
 
-This document describes Test::Effects version 0.001003
+This document describes Test::Effects version 0.001004
 
 
 =head1 SYNOPSIS

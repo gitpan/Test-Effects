@@ -28,3 +28,8 @@ Revision history for Test-Effects
 0.001003  Fri Jul 26 13:09:23 2013
 
     - Fixed 5.18 madness
+
+
+0.001004  Sat May  3 10:03:21 2014
+
+    - Patched to avoid experimental warnings under 5.19+
