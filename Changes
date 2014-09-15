@@ -33,3 +33,10 @@ Revision history for Test-Effects
 0.001004  Sat May  3 10:03:21 2014
 
     - Patched to avoid experimental warnings under 5.19+
+
+
+0.001005  Mon Sep 15 12:41:28 2014
+
+    - Doc patch to overcome stupid limitations on module
+      descriptions under =head1 NAME
+      (thanks Gordon)

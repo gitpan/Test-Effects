@@ -5,7 +5,7 @@ no if $] >= 5.018, 'warnings', "experimental::smartmatch";
 use strict;
 use 5.014;
 
-our $VERSION = '0.001004';
+our $VERSION = '0.001005';
 
 use Test::More;
 use Test::Trap;
@@ -624,12 +624,12 @@ __END__
 
 =head1 NAME
 
-Test::Effects - Test all effects at once: return value, I/O, warnings, exceptions, etc.
+Test::Effects - Test all effects at once (return value, I/O, warnings, exceptions, etc.)
 
 
 =head1 VERSION
 
-This document describes Test::Effects version 0.001004
+This document describes Test::Effects version 0.001005
 
 
 =head1 SYNOPSIS
